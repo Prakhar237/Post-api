@@ -1,0 +1,10 @@
+{
+  "name": "unreal-supabase-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only JSON bridge mirroring Supabase data for the Unreal Engine spot-booking app.",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0"
+  }
+}

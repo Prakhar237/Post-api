@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Supabase Bridge · Live Mirror</title>
+<style>
+  :root {
+    --bg:        #0b0e14;
+    --panel:     #121722;
+    --line:      #1f2735;
+    --ink:       #e6edf3;
+    --muted:     #7d8ba0;
+    --accent:    #4cc9b0;   /* signal-green: "bridge active" */
+    --warn:      #e0a458;
+    --dead:      #5a6373;
+    --mono:      ui-monospace, "SF Mono", "Roboto Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--mono); font-size: 14px; line-height: 1.5;
+    padding: 28px 22px 60px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+
+  header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+           border-bottom: 1px solid var(--line); padding-bottom: 16px; }
+  h1 { font-size: 18px; font-weight: 600; letter-spacing: .04em; margin: 0;
+       text-transform: uppercase; }
+  .pulse { display: inline-flex; align-items: center; gap: 7px; font-size: 12px;
+           color: var(--accent); letter-spacing: .08em; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+         box-shadow: 0 0 0 0 var(--accent); animation: ring 1.8s infinite; }
+  @keyframes ring {
+    0%   { box-shadow: 0 0 0 0 rgba(76,201,176,.6); }
+    70%  { box-shadow: 0 0 0 9px rgba(76,201,176,0); }
+    100% { box-shadow: 0 0 0 0 rgba(76,201,176,0); }
+  }
+  @media (prefers-reduced-motion: reduce) { .dot { animation: none; } }
+  .stamp { color: var(--muted); font-size: 12px; margin-left: auto; }
+
+  .counts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+            margin: 20px 0; }
+  .count { background: var(--panel); border: 1px solid var(--line);
+           border-radius: 8px; padding: 14px 16px; }
+  .count b { font-size: 26px; font-weight: 600; display: block; }
+  .count span { color: var(--muted); font-size: 11px; text-transform: uppercase;
+                letter-spacing: .08em; }
+
+  .urls { background: var(--panel); border: 1px solid var(--line);
+          border-radius: 8px; padding: 14px 16px; margin-bottom: 22px; }
+  .urls h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .1em;
+             color: var(--muted); margin: 0 0 10px; }
+  .urls code { display: block; color: var(--accent); padding: 4px 0;
+               word-break: break-all; }
+  .urls code b { color: var(--warn); font-weight: 500; }
+
+  section { margin-top: 26px; }
+  .label { font-size: 11px; text-transform: uppercase; letter-spacing: .1em;
+           color: var(--muted); margin-bottom: 8px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line);
+           vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; text-transform: uppercase;
+       font-size: 10.5px; letter-spacing: .06em; }
+  td.url { max-width: 320px; word-break: break-all; color: var(--accent); }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 20px;
+         font-size: 11px; border: 1px solid var(--line); }
+  .live  { color: var(--accent); border-color: rgba(76,201,176,.4); }
+  .idle  { color: var(--dead); }
+  .pend  { color: var(--warn);  border-color: rgba(224,164,88,.4); }
+
+  .raw { margin-top: 30px; }
+  .raw summary { cursor: pointer; color: var(--muted); font-size: 12px;
+                 letter-spacing: .06em; }
+  pre { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+        padding: 16px; overflow: auto; font-size: 12px; color: #b7c2d0;
+        max-height: 460px; }
+  .err { color: var(--warn); }
+  .empty { color: var(--muted); padding: 14px 0; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Supabase Bridge</h1>
+    <span class="pulse"><span class="dot"></span>LIVE MIRROR</span>
+    <span class="stamp" id="stamp">connecting…</span>
+  </header>
+
+  <div class="counts" id="counts"></div>
+
+  <div class="urls">
+    <h2>Endpoints for Unreal (VArest GET)</h2>
+    <code id="u-base"></code>
+    <code id="u-user"></code>
+    <code id="u-floor"></code>
+  </div>
+
+  <section>
+    <div class="label">Bookings</div>
+    <div id="bookings"></div>
+  </section>
+
+  <section>
+    <div class="label">Spots</div>
+    <div id="spots"></div>
+  </section>
+
+  <details class="raw">
+    <summary>Raw JSON (exactly what Unreal receives)</summary>
+    <pre id="raw">—</pre>
+  </details>
+
+</div>
+
+<script>
+  // This page reads ONLY the public /api/data endpoint.
+  // No Supabase key is ever present in the browser.
+  const ENDPOINT = '/api/data';
+  const REFRESH_MS = 10000; // cosmetic, for the human viewing this page only.
+
+  const $ = (id) => document.getElementById(id);
+
+  function esc(v) {
+    if (v === null || v === undefined) return '<span class="idle">—</span>';
+    return String(v).replace(/[&<>]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;' }[c]));
+  }
+
+  function statusTag(b) {
+    if (b.is_active) return '<span class="tag live">active</span>';
+    if (b.floor_type === 'ground' && !b.approved)
+      return '<span class="tag pend">awaiting approval</span>';
+    return '<span class="tag idle">inactive</span>';
+  }
+
+  function renderBookings(rows) {
+    if (!rows.length) return '<div class="empty">No bookings yet.</div>';
+    const head = ['spot_id','floor','type','content_url','status','expires_at'];
+    const body = rows.map((b) => `
+      <tr>
+        <td>${esc(b.spot_id)}</td>
+        <td>${esc(b.floor_type)} ${esc(b.floor_number)}</td>
+        <td>${esc(b.content_type)}</td>
+        <td class="url">${esc(b.content_url)}</td>
+        <td>${statusTag(b)}</td>
+        <td>${esc(b.expires_at)}</td>
+      </tr>`).join('');
+    return `<table><thead><tr>${head.map((h)=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>`;
+  }
+
+  function renderSpots(rows) {
+    if (!rows.length) return '<div class="empty">No spots seeded.</div>';
+    const head = ['spot_id','floor_number','floor_type','occupied'];
+    const body = rows
+      .sort((a,b) => String(a.spot_id).localeCompare(String(b.spot_id)))
+      .map((s) => `
+        <tr>
+          <td>${esc(s.spot_id)}</td>
+          <td>${esc(s.floor_number)}</td>
+          <td>${esc(s.floor_type)}</td>
+          <td>${esc(s.is_occupied)}</td>
+        </tr>`).join('');
+    return `<table><thead><tr>${head.map((h)=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>`;
+  }
+
+  function setUrls() {
+    const origin = window.location.origin;
+    $('u-base').innerHTML  = `${origin}/api/data`;
+    $('u-user').innerHTML  = `${origin}/api/data?user_id=<b>USER_UUID</b>`;
+    $('u-floor').innerHTML = `${origin}/api/data?user_id=<b>USER_UUID</b>&floor_type=<b>ground</b>`;
+  }
+
+  async function load() {
+    try {
+      const res = await fetch(ENDPOINT, { cache: 'no-store' });
+      const data = await res.json();
+
+      if (data.error) {
+        $('stamp').innerHTML = `<span class="err">error: ${esc(data.error)}</span>`;
+        return;
+      }
+
+      const c = data.counts || {};
+      $('counts').innerHTML = [
+        ['Bookings', c.bookings], ['Spots', c.spots],
+        ['Profiles', c.profiles], ['Coupons', c.coupons],
+      ].map(([k,v]) => `<div class="count"><b>${v ?? 0}</b><span>${k}</span></div>`).join('');
+
+      $('bookings').innerHTML = renderBookings(data.bookings || []);
+      $('spots').innerHTML    = renderSpots(data.spots || []);
+      $('raw').textContent    = JSON.stringify(data, null, 2);
+      $('stamp').textContent  = 'updated ' + new Date().toLocaleTimeString();
+    } catch (e) {
+      $('stamp').innerHTML = `<span class="err">unreachable: ${esc(e.message)}</span>`;
+    }
+  }
+
+  setUrls();
+  load();
+  setInterval(load, REFRESH_MS);
+</script>
+</body>
+</html>
