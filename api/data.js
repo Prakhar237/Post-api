@@ -17,9 +17,11 @@ import { createClient } from '@supabase/supabase-js';
 // SUPABASE_URL is public (it's already in your front-end), safe to hardcode.
 const SUPABASE_URL = 'https://tlmhonuejcubyhzihjwv.supabase.co';
 
-// SERVICE KEY: set this in Vercel -> Project -> Settings -> Environment
-// Variables as  SUPABASE_SERVICE_KEY.  Do NOT paste it into index.html.
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || '';
+// Publishable key
+const PUBLISHABLE_KEY = 'sb_publishable_x8tiJMNwah-jnDqejVobYA_6eWZ9ntl';
+
+// SERVICE KEY: Hardcoded as requested
+const SERVICE_KEY = 'sb_secret_RaDJLXNtIFUl1UAPR6wg-Q_bz3kPU6O';
 
 const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
   auth: { persistSession: false },
