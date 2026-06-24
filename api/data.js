@@ -17,11 +17,9 @@ import { createClient } from '@supabase/supabase-js';
 // SUPABASE_URL is public (it's already in your front-end), safe to hardcode.
 const SUPABASE_URL = 'https://tlmhonuejcubyhzihjwv.supabase.co';
 
-// Publishable key
-const PUBLISHABLE_KEY = 'sb_publishable_x8tiJMNwah-jnDqejVobYA_6eWZ9ntl';
-
-// SERVICE KEY: Hardcoded as requested
-const SERVICE_KEY = 'sb_secret_RaDJLXNtIFUl1UAPR6wg-Q_bz3kPU6O';
+// SERVICE KEY: set this in Vercel -> Project -> Settings -> Environment
+// Variables as  SUPABASE_SERVICE_KEY.  Do NOT paste it into index.html.
+const SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || '';
 
 const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
   auth: { persistSession: false },
@@ -108,17 +106,26 @@ export default async function handler(req, res) {
     if (user_id)    bookings = bookings.filter((b) => b.user_id === user_id);
     if (floor_type) bookings = bookings.filter((b) => b.floor_type === floor_type);
 
+    // user_id ALSO narrows profiles + coupons, so a login lookup returns
+    // exactly that one user — no other users' emails ever leave the server.
+    let profiles = profilesQ.data;
+    let coupons  = couponsQ.data;
+    if (user_id) {
+      profiles = profiles.filter((p) => p.id === user_id);
+      coupons  = coupons.filter((c) => c.user_id === user_id);
+    }
+
     return res.status(200).json({
       generated_at: now.toISOString(),
       filters: { user_id: user_id || null, floor_type: floor_type || null },
       counts: {
-        profiles: profilesQ.data.length,
-        coupons:  couponsQ.data.length,
+        profiles: profiles.length,
+        coupons:  coupons.length,
         spots:    spotsQ.data.length,
         bookings: bookings.length,
       },
-      profiles:      profilesQ.data,
-      floor_coupons: couponsQ.data,
+      profiles,
+      floor_coupons: coupons,
       spots:         spotsQ.data,
       bookings,
     });
