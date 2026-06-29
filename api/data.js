@@ -98,6 +98,7 @@ export default async function handler(req, res) {
         side_url:     media ? (media.side_button_url || null) : null,
         approved:     b.approved,
         expires_at:   b.expires_at,
+        submitted_at: b.submitted_at,   // used to pick the latest per spot
         is_active:    playable,         // Unreal: only play when true
       };
     });
@@ -105,6 +106,27 @@ export default async function handler(req, res) {
     // Optional server-side filters (this is what Unreal calls with).
     if (user_id)    bookings = bookings.filter((b) => b.user_id === user_id);
     if (floor_type) bookings = bookings.filter((b) => b.floor_type === floor_type);
+
+    // Collapse to ONE EFFECTIVE booking per spot (per user + floor).
+    // Rule: the latest-submitted booking that is currently playable wins.
+    // If none is playable, keep the latest-submitted row but is_active=false,
+    // so Unreal knows to CLEAR that spot (covers graceful handover + takedown).
+    // This is what implements "one effective approved booking per spot": during
+    // the pending window the old APPROVED row is still playable and beats the new
+    // pending one; once the new row is approved, both are playable so newest wins.
+    const bySpot = new Map();
+    for (const b of bookings) {
+      const key = `${b.user_id}|${b.floor_type}|${b.spot_id}`;
+      const cur = bySpot.get(key);
+      if (!cur) { bySpot.set(key, b); continue; }
+      const bT = new Date(b.submitted_at).getTime();
+      const cT = new Date(cur.submitted_at).getTime();
+      const bBetter =
+        (b.is_active && !cur.is_active) ||                 // playable beats non-playable
+        (b.is_active === cur.is_active && bT > cT);        // else newest wins
+      if (bBetter) bySpot.set(key, b);
+    }
+    bookings = Array.from(bySpot.values());
 
     // user_id ALSO narrows profiles + coupons, so a login lookup returns
     // exactly that one user — no other users' emails ever leave the server.
