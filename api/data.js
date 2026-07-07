@@ -62,17 +62,24 @@ export default async function handler(req, res) {
   try {
     const { user_id, floor_type } = req.query;
 
-    // Pull the whole database (full mirror).
-    const [profilesQ, couponsQ, spotsQ, bookingsQ] = await Promise.all([
-      supabase.from('profiles').select('*'),
-      supabase.from('floor_coupons').select('*'),
-      supabase.from('spots').select('*'),
-      supabase.from('bookings').select('*, booking_media(*)'),
-    ]);
-
-    for (const q of [profilesQ, couponsQ, spotsQ, bookingsQ]) {
-      if (q.error) throw q.error;
+    // HARD GATE: no UUID -> no data at all. The bridge only answers
+    // per-user queries; an empty or missing user_id returns nothing.
+    if (!user_id || !String(user_id).trim()) {
+      return res.status(400).json({
+        error: 'user_id is required',
+        generated_at: new Date().toISOString(),
+        filters: { user_id: null, floor_type: floor_type || null },
+        counts: { profiles: 0, coupons: 0, spots: 0, bookings: 0 },
+        profiles: [],
+        floor_coupons: [],
+        spots: [],
+        bookings: [],
+      });
     }
+
+    // Only bookings are ever returned, so only bookings are queried.
+    const bookingsQ = await supabase.from('bookings').select('*, booking_media(*)');
+    if (bookingsQ.error) throw bookingsQ.error;
 
     const now = new Date();
 
@@ -128,27 +135,22 @@ export default async function handler(req, res) {
     }
     bookings = Array.from(bySpot.values());
 
-    // user_id ALSO narrows profiles + coupons, so a login lookup returns
-    // exactly that one user — no other users' emails ever leave the server.
-    let profiles = profilesQ.data;
-    let coupons  = couponsQ.data;
-    if (user_id) {
-      profiles = profiles.filter((p) => p.id === user_id);
-      coupons  = coupons.filter((c) => c.user_id === user_id);
-    }
-
+    // BOOKINGS-ONLY policy: with a valid user_id the bridge returns ONLY that
+    // user's effective bookings. Profiles, coupons, and the global spot catalog
+    // are never exposed (login gets floor/coupon via the in-page hash instead).
+    // Keys are kept as empty arrays so existing VaRest parsing never breaks.
     return res.status(200).json({
       generated_at: now.toISOString(),
       filters: { user_id: user_id || null, floor_type: floor_type || null },
       counts: {
-        profiles: profiles.length,
-        coupons:  coupons.length,
-        spots:    spotsQ.data.length,
+        profiles: 0,
+        coupons:  0,
+        spots:    0,
         bookings: bookings.length,
       },
-      profiles,
-      floor_coupons: coupons,
-      spots:         spotsQ.data,
+      profiles:      [],
+      floor_coupons: [],
+      spots:         [],
       bookings,
     });
   } catch (err) {
