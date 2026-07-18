@@ -42,7 +42,7 @@ function resolveContentUrl(b, media) {
                                : (media.custom_url || null);
     case '3d_model':   return media.model_file_path
                                ? publicUrl('models', media.model_file_path)
-                               : null;
+                               : (media.custom_url || null);
     case 'custom_url': return media.custom_url || null;
     default:           return media.youtube_url || media.custom_url || null;
   }
